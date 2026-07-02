@@ -13,9 +13,9 @@ returns a 403. This module handles that automatically.
   NSE changed this format in July 2024 and may change it again - if
   this starts 404ing on trading days, check https://www.nseindia.com/all-reports
   ("CM-UDiFF Common Bhavcopy Final (zip)") for the new pattern.
-- BSE_BHAVCOPY_URL: BSE has used a few different formats over the years.
-  If this 404s, check https://www.bseindia.com/download/BhavCopy/Equity/
-  manually and update the URL + _normalize_bse() column mapping.
+- BSE_BHAVCOPY_URL: BSE has bot-detection that may block simple requests
+  even with session priming - if BSE keeps failing, that's expected for
+  now and doesn't block the pipeline; NSE data still flows through.
 - Whether DELIV_PER (delivery %) ships inside this NSE file or needs a
   separate report - script checks for the column and logs a warning if
   it's missing rather than failing silently.
@@ -89,25 +89,51 @@ def fetch_nse_bhavcopy(date: datetime) -> pd.DataFrame:
     return df
 
 
+def _bse_session() -> requests.Session:
+    """BSE has bot-detection on their site (confirmed - a plain request to
+    their bhavcopy page gets blocked). Priming a session against the
+    homepage first, same approach as NSE, is worth trying before falling
+    back to skipping BSE entirely."""
+    s = requests.Session()
+    s.headers.update(HEADERS)
+    s.get("https://www.bseindia.com", timeout=10)
+    return s
+
+
 def fetch_bse_bhavcopy(date: datetime) -> pd.DataFrame:
     """Downloads BSE's daily equity bhavcopy. Returns an empty DataFrame
-    on holidays/weekends."""
+    on holidays/weekends/fetch failures - BSE being unavailable should
+    never crash the pipeline, since NSE alone covers the large majority
+    of actively-traded stocks."""
     date_str = date.strftime("%d%m%y")
     url = BSE_BHAVCOPY_URL.format(date=date_str)
-    resp = requests.get(url, headers=HEADERS, timeout=20)
 
-    if resp.status_code != 200:
+    try:
+        session = _bse_session()
+        resp = session.get(url, timeout=20)
+
+        if resp.status_code != 200:
+            logger.warning(
+                f"BSE bhavcopy unavailable for {date_str} (status {resp.status_code}) "
+                f"- likely a holiday, bot-blocked, or BSE changed their URL format."
+            )
+            return pd.DataFrame()
+
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+            csv_name = z.namelist()[0]
+            with z.open(csv_name) as f:
+                df = pd.read_csv(f)
+
+    except zipfile.BadZipFile:
         logger.warning(
-            f"BSE bhavcopy unavailable for {date_str} (status {resp.status_code}) "
-            f"- likely a holiday, but could mean BSE changed their URL format. "
-            f"Check bseindia.com/download/BhavCopy/Equity if this persists on a trading day."
+            f"BSE returned a non-zip response for {date_str} - almost certainly "
+            f"bot-detection blocking the request rather than serving the file. "
+            f"Skipping BSE for this date; NSE data is unaffected."
         )
         return pd.DataFrame()
-
-    with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
-        csv_name = z.namelist()[0]
-        with z.open(csv_name) as f:
-            df = pd.read_csv(f)
+    except Exception as e:
+        logger.warning(f"BSE fetch failed for {date_str} ({e}) - skipping BSE for this date.")
+        return pd.DataFrame()
 
     df.columns = [c.strip().upper() for c in df.columns]
     df["EXCHANGE"] = "BSE"
