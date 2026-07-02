@@ -1,4 +1,4 @@
-name: .github/workflows/daily-update.yml
+name: Daily Stock Data Update
 
 on:
   schedule:
