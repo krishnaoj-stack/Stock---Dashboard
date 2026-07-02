@@ -16,9 +16,9 @@ returns a 403. This module handles that automatically.
 - BSE_BHAVCOPY_URL: BSE has bot-detection that may block simple requests
   even with session priming - if BSE keeps failing, that's expected for
   now and doesn't block the pipeline; NSE data still flows through.
-- Whether DELIV_PER (delivery %) ships inside this NSE file or needs a
-  separate report - script checks for the column and logs a warning if
-  it's missing rather than failing silently.
+- Delivery %% is not part of NSE's current bhavcopy format at all -
+  confirmed via NSE's own UDiFF field list. DELIV_PER stays blank until
+  a separate delivery report is added as a future improvement.
 """
 
 import io
@@ -80,10 +80,10 @@ def fetch_nse_bhavcopy(date: datetime) -> pd.DataFrame:
     df["DATE"] = date.strftime("%Y-%m-%d")
 
     if "DELIV_PER" not in df.columns:
-        logger.warning(
-            "DELIV_PER not present in this NSE file - delivery %% will be "
-            "blank for this date. Check nseindia.com/all-reports for a "
-            "separate delivery position report if this persists."
+        logger.info(
+            "Delivery %% is not part of NSE's current bhavcopy format - "
+            "expected, not an error. DELIV_PER will stay blank until a "
+            "separate delivery report is wired in as a future addition."
         )
 
     return df
@@ -142,23 +142,27 @@ def fetch_bse_bhavcopy(date: datetime) -> pd.DataFrame:
 
 
 def _normalize_nse(df: pd.DataFrame) -> pd.DataFrame:
-    """Maps NSE's column names to our common schema. Keeps only the EQ
-    (regular equity) series by default - SME stocks (SM/ST series) are
-    tagged separately in fetch_reference.py, not dropped here."""
+    """Maps NSE's column names to our common schema. NSE switched to the
+    UDiFF format in July 2024 with entirely different column names than
+    the old bhavcopy - confirmed current as of mid-2026. Note: columns
+    arrive already uppercased (see fetch_nse_bhavcopy), so the lookups
+    below use the uppercased forms (TCKRSYMB, not TckrSymb). Keeps all
+    series (EQ/BE/SM/ST) - SME stocks are tagged separately in
+    fetch_reference.py rather than filtered out here."""
     return pd.DataFrame({
-        "SYMBOL": df.get("SYMBOL"),
-        "SERIES": df.get("SERIES"),
+        "SYMBOL": df.get("TCKRSYMB"),
+        "SERIES": df.get("SCTYSRS"),
         "ISIN": df.get("ISIN"),
         "EXCHANGE": "NSE",
         "DATE": df.get("DATE"),
-        "OPEN": pd.to_numeric(df.get("OPEN"), errors="coerce"),
-        "HIGH": pd.to_numeric(df.get("HIGH"), errors="coerce"),
-        "LOW": pd.to_numeric(df.get("LOW"), errors="coerce"),
-        "CLOSE": pd.to_numeric(df.get("CLOSE"), errors="coerce"),
-        "PREV_CLOSE": pd.to_numeric(df.get("PREVCLOSE"), errors="coerce"),
-        "VOLUME": pd.to_numeric(df.get("TOTTRDQTY"), errors="coerce"),
-        "TURNOVER": pd.to_numeric(df.get("TOTTRDVAL"), errors="coerce"),
-        "TRADES": pd.to_numeric(df.get("TOTALTRADES"), errors="coerce"),
+        "OPEN": pd.to_numeric(df.get("OPNPRIC"), errors="coerce"),
+        "HIGH": pd.to_numeric(df.get("HGHPRIC"), errors="coerce"),
+        "LOW": pd.to_numeric(df.get("LWPRIC"), errors="coerce"),
+        "CLOSE": pd.to_numeric(df.get("CLSPRIC"), errors="coerce"),
+        "PREV_CLOSE": pd.to_numeric(df.get("PRVSCLSGPRIC"), errors="coerce"),
+        "VOLUME": pd.to_numeric(df.get("TTLTRADGVOL"), errors="coerce"),
+        "TURNOVER": pd.to_numeric(df.get("TTLTRFVAL"), errors="coerce"),
+        "TRADES": pd.to_numeric(df.get("TTLNBOFTXSEXCTD"), errors="coerce"),
         "DELIV_QTY": pd.to_numeric(df.get("DELIV_QTY"), errors="coerce"),
         "DELIV_PER": pd.to_numeric(df.get("DELIV_PER"), errors="coerce"),
     })
