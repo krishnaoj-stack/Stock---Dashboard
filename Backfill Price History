@@ -1,4 +1,4 @@
-name: Backfill Price History
+name: .github/workflows/backfill.yml
 
 on:
   workflow_dispatch:
