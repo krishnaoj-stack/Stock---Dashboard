@@ -19,7 +19,12 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).parent))
 from fetch_bhavcopy import fetch_both
-from fetch_reference import fetch_amfi_cap_classification, fetch_nse_equity_master, tag_sme
+from fetch_reference import (
+    fetch_amfi_cap_classification,
+    fetch_nse_equity_master,
+    classify_cap_from_amfi,
+    tag_sme,
+)
 from compute_metrics import compute_all
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -64,19 +69,18 @@ def main(run_date: datetime = None) -> None:
 
     print("Fetching cap classification (AMFI)...")
     try:
-        cap_class = fetch_amfi_cap_classification()
-        # NOTE: confirm AMFI's actual column names after the first live run
-        # (they vary release to release), then wire up the real merge, e.g.:
-        #   cap_class = cap_class.rename(columns={"Stock Name": "COMPANY_NAME",
-        #                                          "Category": "CAP_CATEGORY"})
-        #   metrics = metrics.merge(cap_class[["COMPANY_NAME", "CAP_CATEGORY"]],
-        #                            left_on="SYMBOL", right_on="COMPANY_NAME", how="left")
-        # Left as a manual step since AMFI's file doesn't cleanly key on SYMBOL -
-        # it uses company name, which needs a name-matching pass against the
-        # NSE equity master below.
-        cap_class.to_csv(DATA_DIR / "reference" / "amfi_cap_raw.csv", index=False)
+        amfi_raw = fetch_amfi_cap_classification()
+        (DATA_DIR / "reference").mkdir(parents=True, exist_ok=True)
+        amfi_raw.to_csv(DATA_DIR / "reference" / "amfi_cap_raw.csv", index=False)
+
+        cap_classified = classify_cap_from_amfi(amfi_raw)
+        metrics = metrics.merge(cap_classified[["ISIN", "CAP_CATEGORY"]], on="ISIN", how="left")
+        # Not in AMFI's tracked universe at all => smaller than the
+        # smallest tracked Small-cap stock, by construction.
+        metrics["CAP_CATEGORY"] = metrics["CAP_CATEGORY"].fillna("Micro")
+        print(f"Cap classification counts:\n{metrics['CAP_CATEGORY'].value_counts()}")
     except Exception as e:
-        print(f"AMFI fetch failed (non-fatal, dashboard still updates without cap tags): {e}")
+        print(f"AMFI classification failed (non-fatal, dashboard still updates without cap tags): {e}")
 
     print("Fetching NSE equity master (for company names / ISIN cross-check)...")
     try:
