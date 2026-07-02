@@ -8,6 +8,9 @@ on:
         required: false
         default: '300'
 
+permissions:
+  contents: write
+
 jobs:
   backfill:
     runs-on: ubuntu-latest
