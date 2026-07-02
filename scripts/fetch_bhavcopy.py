@@ -19,6 +19,10 @@ returns a 403. This module handles that automatically.
 - Delivery %% is not part of NSE's current bhavcopy format at all -
   confirmed via NSE's own UDiFF field list. DELIV_PER stays blank until
   a separate delivery report is added as a future improvement.
+- EQUITY_SERIES whitelist in _normalize_nse: NSE's CM segment bundles
+  equities with non-equity instruments (gold bonds, government
+  securities, etc.) - if a legitimate new equity series code shows up
+  filtered out unexpectedly, add it to the set.
 """
 
 import io
@@ -146,9 +150,19 @@ def _normalize_nse(df: pd.DataFrame) -> pd.DataFrame:
     UDiFF format in July 2024 with entirely different column names than
     the old bhavcopy - confirmed current as of mid-2026. Note: columns
     arrive already uppercased (see fetch_nse_bhavcopy), so the lookups
-    below use the uppercased forms (TCKRSYMB, not TckrSymb). Keeps all
-    series (EQ/BE/SM/ST) - SME stocks are tagged separately in
-    fetch_reference.py rather than filtered out here."""
+    below use the uppercased forms (TCKRSYMB, not TckrSymb).
+
+    The CM segment bundles equities together with non-equity instruments
+    (Sovereign Gold Bonds under series 'GB', government securities, etc.)
+    - EQUITY_SERIES below is a whitelist of series codes that represent
+    actual stocks (regular, trade-to-trade, and SME), filtering out
+    everything else rather than trying to guess/exclude every non-equity
+    code individually."""
+    EQUITY_SERIES = {"EQ", "BE", "BZ", "BL", "BT", "SM", "ST"}
+
+    if "SCTYSRS" in df.columns:
+        df = df[df["SCTYSRS"].isin(EQUITY_SERIES)]
+
     return pd.DataFrame({
         "SYMBOL": df.get("TCKRSYMB"),
         "SERIES": df.get("SCTYSRS"),
