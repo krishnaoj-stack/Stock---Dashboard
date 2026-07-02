@@ -2,9 +2,11 @@ name: Daily Stock Data Update
 
 on:
   schedule:
-    # 12:35 UTC = 6:05 PM IST - after market close and NSE's bhavcopy publish time
     - cron: '35 12 * * 1-5'
-  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab, for testing
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 jobs:
   update:
